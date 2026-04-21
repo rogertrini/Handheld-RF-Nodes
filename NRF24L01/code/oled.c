@@ -1,3 +1,6 @@
+// need to implment the recieved message terminal.. currently only sends fake message
+
+
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
