@@ -1,4 +1,4 @@
-// need to implment the recieved message terminal.. currently only sends fake message
+// need to implement the recieved message terminal.. currently only sends fake message
 
 
 #include <Wire.h>
