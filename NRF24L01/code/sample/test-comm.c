@@ -1,17 +1,17 @@
 // 	MIT License
-// 
+//
 // 	Copyright (c) 2018 Helvijs Adams
-// 
+//
 // 	Permission is hereby granted, free of charge, to any person obtaining a copy
 // 	of this software and associated documentation files (the "Software"), to deal
 // 	in the Software without restriction, including without limitation the rights
 // 	to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // 	copies of the Software, and to permit persons to whom the Software is
 // 	furnished to do so, subject to the following conditions:
-// 
+//
 // 	The above copyright notice and this permission notice shall be included in all
 // 	copies or substantial portions of the Software.
-// 
+//
 // 	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // 	IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // 	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -52,11 +52,11 @@
 void print_config(void);
 
 //	Used in IRQ ISR
-volatile bool message_received = false;
+// volatile bool message_received = false;
 volatile bool status = false;
 
 int main(void)
-{	
+{
 	//	Set cliche message to send (message cannot exceed 32 characters)
 	char tx_message[32];				// Define string array
 	strcpy(tx_message,"Hello World!");	// Copy string into array
@@ -65,33 +65,37 @@ int main(void)
 	uart_init();
 	
 	//	Initialize nRF24L01+ and print configuration info
-    nrf24_init();
+	nrf24_init();
 	print_config();
 	
 	//	Start listening to incoming messages
 	nrf24_start_listening();
 	
-    while (1) 
-    {
-		if (message_received)
+	// replaced with polling
+	while (1)
+	{
+		if (nrf24_available())
 		{
-			//	Message received, print it
-			message_received = false;
-			printf("Received message: %s\n",nrf24_read_message());
-			//	Send message as response
+			printf("Received: %s\n", nrf24_read_message());
+
 			_delay_ms(500);
+
 			status = nrf24_send_message(tx_message);
-			if (status == true) printf("Message sent successfully\n");
+
+			if(status)
+			printf("Message sent successfully\n");
 		}
-    }
+	}
 }
 
+/* Don't want to use IRQ Pin so we 
+are converting to Polling interrupts
 //	Interrupt on IRQ pin
-ISR(INT0_vect) 
+ISR(INT0_vect)
 {
 	message_received = true;
 }
-
+*/
 void print_config(void)
 {
 	uint8_t data;
