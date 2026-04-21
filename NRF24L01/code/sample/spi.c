@@ -114,4 +114,4 @@ uint8_t spi_exchange( uint8_t send_data )
 	SPDR = send_data;
 	loop_until_bit_is_set(SPSR, SPIF);
 	return SPDR;
-}
+} 
