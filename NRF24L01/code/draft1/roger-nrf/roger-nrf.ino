@@ -6,12 +6,12 @@
 
 // Roger device custom wiring.
 // Pinout:
-//   Button 1 -> A0  -> sends "HI"
-//   Button 2 -> A1  -> sends "BYE"
-//   Button 3 -> A2  -> sends "YOUR MOM"
-//   Button 4 -> A3  -> sends "SOS"
+//   Button 1 -> A0  -> previous TX message
+//   Button 2 -> A1  -> next TX message
+//   Button 3 -> A2  -> send selected TX message
+//   Button 4 -> A3  -> quick-send SOS
 //   Red LED  -> D8
-//   Buzzer   -> D7
+//   Buzzer   -> D3
 //   OLED SDA -> A4
 //   OLED SCL -> A5
 //   nRF CE   -> D9
@@ -28,7 +28,7 @@ const byte BUTTON_2_PIN = A1;
 const byte BUTTON_3_PIN = A2;
 const byte BUTTON_4_PIN = A3;
 const byte LED_PIN = 8;
-const byte BUZZER_PIN = 7;
+const byte BUZZER_PIN = 3;
 
 const byte THIS_ADDRESS[6] = "ROGER";
 const byte PEER_ADDRESS[6] = "JOSH1";
@@ -44,16 +44,19 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 const char *messages[] = {
   "HI",
   "BYE",
-  "YOUR MOM",
+  "YES",
+  "NO",
+  "CLEAR",
   "SOS"
 };
 
 const byte MESSAGE_COUNT = sizeof(messages) / sizeof(messages[0]);
+const byte SOS_INDEX = 5;
 const unsigned long DEBOUNCE_MS = 160;
 const unsigned long RX_INDICATOR_MS = 350;
-const unsigned long SOS_FLASH_MS = 1800;
-const unsigned long SOS_FLASH_STEP_MS = 150;
-const unsigned int BUZZ_HZ = 2200;
+const unsigned long SOS_FLASH_MS = 3000;
+const unsigned long SOS_FLASH_STEP_MS = 120;
+const unsigned int BUZZ_HZ = 2400;
 const unsigned int BUZZ_MS = 180;
 
 struct Packet {
@@ -62,11 +65,13 @@ struct Packet {
   uint32_t counter;
 };
 
+byte currentIndex = 0;
 int receivedIndex = -1;
 int lastSentIndex = -1;
 uint32_t txCounter = 0;
 unsigned long lastButtonMs = 0;
 unsigned long rxIndicatorUntil = 0;
+unsigned long buzzerUntil = 0;
 unsigned long sosFlashUntil = 0;
 unsigned long lastSosFlashMs = 0;
 bool sosLedState = LOW;
@@ -120,6 +125,7 @@ void loop() {
   handleButtons();
   handleRadio();
 
+  handleBuzzer();
   handleSosFlash();
 
   if (sosFlashUntil == 0 && rxIndicatorUntil != 0 && millis() > rxIndicatorUntil) {
@@ -136,22 +142,22 @@ void handleButtons() {
 
   if (millis() - lastButtonMs > DEBOUNCE_MS) {
     if (lastB1 == HIGH && b1 == LOW) {
-      sendMessage(0);
+      previousMessage();
       printButtons(b1, b2, b3, b4);
     }
 
     if (lastB2 == HIGH && b2 == LOW) {
-      sendMessage(1);
+      nextMessage();
       printButtons(b1, b2, b3, b4);
     }
 
     if (lastB3 == HIGH && b3 == LOW) {
-      sendMessage(2);
+      sendMessage(currentIndex);
       printButtons(b1, b2, b3, b4);
     }
 
     if (lastB4 == HIGH && b4 == LOW) {
-      sendMessage(3);
+      sendMessage(SOS_INDEX);
       printButtons(b1, b2, b3, b4);
     }
   }
@@ -170,16 +176,16 @@ void handleRadio() {
     if (packet.messageIndex < MESSAGE_COUNT) {
       receivedIndex = packet.messageIndex;
       drawScreen();
-      if (receivedIndex == 3) {
+      if (packet.messageIndex == SOS_INDEX) {
         startSosAlert();
       } else {
         digitalWrite(LED_PIN, HIGH);
         rxIndicatorUntil = millis() + RX_INDICATOR_MS;
-        tone(BUZZER_PIN, BUZZ_HZ, BUZZ_MS);
+        startBuzzer(BUZZ_MS);
       }
 
       Serial.print("received=1 msg=");
-      Serial.print(messages[receivedIndex]);
+      Serial.print(messages[packet.messageIndex]);
       Serial.print(" count=");
       Serial.println(packet.counter);
     }
@@ -211,6 +217,21 @@ void sendMessage(byte messageIndex) {
   lastButtonMs = millis();
 }
 
+void previousMessage() {
+  currentIndex = currentIndex == 0 ? MESSAGE_COUNT - 1 : currentIndex - 1;
+  drawScreen();
+  lastButtonMs = millis();
+}
+
+void nextMessage() {
+  currentIndex++;
+  if (currentIndex >= MESSAGE_COUNT) {
+    currentIndex = 0;
+  }
+  drawScreen();
+  lastButtonMs = millis();
+}
+
 void drawScreen() {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
@@ -218,17 +239,22 @@ void drawScreen() {
   display.setTextSize(1);
   display.setCursor(0, 0);
   display.println("ROGER NRF");
-  display.setCursor(70, 0);
+  display.setCursor(0, 10);
   display.print("TX:");
-  display.println(lastSentIndex < 0 ? "-" : messages[lastSentIndex]);
-  display.drawLine(0, 11, 127, 11, SSD1306_WHITE);
+  display.print(messages[currentIndex]);
+  if (lastSentIndex >= 0) {
+    display.setCursor(58, 10);
+    display.print("S:");
+    display.print(messages[lastSentIndex]);
+  }
+  display.drawLine(0, 21, 127, 21, SSD1306_WHITE);
 
   display.setTextSize(1);
-  display.setCursor(0, 16);
+  display.setCursor(0, 25);
   display.println("RECEIVED");
 
   const char *rxText = receivedIndex < 0 ? "NONE" : messages[receivedIndex];
-  drawText(rxText, 34, strlen(rxText) > 7 ? 2 : 3);
+  drawText(rxText, 42, strlen(rxText) > 5 ? 2 : 3);
   display.display();
 }
 
@@ -269,7 +295,8 @@ void startSosAlert() {
   sosFlashUntil = millis() + SOS_FLASH_MS;
   lastSosFlashMs = 0;
   sosLedState = LOW;
-  tone(BUZZER_PIN, BUZZ_HZ, SOS_FLASH_MS);
+  digitalWrite(LED_PIN, LOW);
+  noTone(BUZZER_PIN);
 }
 
 void handleSosFlash() {
@@ -288,5 +315,22 @@ void handleSosFlash() {
     lastSosFlashMs = millis();
     sosLedState = !sosLedState;
     digitalWrite(LED_PIN, sosLedState);
+    if (sosLedState) {
+      tone(BUZZER_PIN, BUZZ_HZ);
+    } else {
+      noTone(BUZZER_PIN);
+    }
+  }
+}
+
+void startBuzzer(unsigned long durationMs) {
+  tone(BUZZER_PIN, BUZZ_HZ);
+  buzzerUntil = millis() + durationMs;
+}
+
+void handleBuzzer() {
+  if (buzzerUntil != 0 && millis() >= buzzerUntil) {
+    noTone(BUZZER_PIN);
+    buzzerUntil = 0;
   }
 }
